@@ -1,13 +1,16 @@
+import sys
 import random
 import json
 import os
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QSpinBox, QMessageBox, QStackedWidget
+from PySide6.QtCore import Qt
 
+# Constants and Data Setup
 szin = ['Hearts', 'Diamonds', 'Clubs', 'Spades']
 nev = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace']
 ertekek = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 7, '7': 7, '8': 8, '9': 9, '10': 10, 'Jack': 10, 'Queen': 10, 'King': 10, 'Ace': 11}
 
 deck = [{'ertek': ertek, 'suit': suit, 'value': ertekek[ertek]} for ertek in nev for suit in szin] * 4
-
 random.shuffle(deck)
 
 DATA = "data.json"
@@ -27,7 +30,6 @@ def load_balance(name):
             json.dump(balances, f)
 
     if name not in balances:
-        print(f"No record found for {name}. Creating a new account with ${INITIAL_BALANCE}.")
         balances[name] = INITIAL_BALANCE
         with open(DATA, 'w') as f:
             json.dump(balances, f)
@@ -52,115 +54,181 @@ def calculate_hand_value(hand):
         aces -= 1
     return value
 
-def display_hand(hand, name="Player"):
-    hand_str = ', '.join(f"{card['ertek']} of {card['suit']}" for card in hand)
-    print(f"{name}: {hand_str} (Value: {calculate_hand_value(hand)})")
+class LoginScreen(QWidget):
+    def __init__(self, app, stack):
+        super().__init__()
 
-def blackjack(player_name, balance):
-    global deck
-    if len(deck) < 20:
-        print("Reshuffling deck...")
-        deck = [{'ertek': ertek, 'suit': suit, 'value': ertekek[ertek]} for ertek in nev for suit in szin] * 4
-        random.shuffle(deck)
+        self.setWindowTitle('Blackjack - Login')
+        self.setGeometry(100, 100, 400, 200)
 
-    # Refill balance if it's 0
-    if balance <= 0:
-        balance = INITIAL_BALANCE
-        save_balance(player_name, balance)
+        self.app = app
+        self.stack = stack
 
-    print(f"Your current balance: ${balance}")
-    bet = 0
-    while True:
-        try:
-            bet = int(input("Place your bet: $"))
-            if bet > balance:
-                print("You don't have enough balance!")
-            elif bet <= 0:
-                print("Bet must be a positive amount!")
-            else:
-                break
-        except ValueError:
-            print("Invalid input. Please enter a number.")
+        # UI Elements
+        self.layout = QVBoxLayout()
 
-    player_hand = [deck.pop(), deck.pop()]
-    dealer_hand = [deck.pop(), deck.pop()]
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Enter your name")
+        self.layout.addWidget(self.name_input)
 
-    display_hand(player_hand, player_name)
-    print(f"Dealer: {dealer_hand[0]['ertek']} of {dealer_hand[0]['suit']}, [Hidden]")
+        self.start_button = QPushButton('Start Game', self)
+        self.start_button.clicked.connect(self.start_game)
+        self.layout.addWidget(self.start_button)
 
-    # Immediate win if player gets a Blackjack
-    if calculate_hand_value(player_hand) == 21:
-        print("Blackjack! You win!")
-        balance += int(bet * 1.5)  # Blackjack pays 3:2
-        save_balance(player_name, balance)
-        print(f"Your current balance is ${balance}.")
-        return balance
+        self.setLayout(self.layout)
 
-    # Player's turn
-    while True:
+    def start_game(self):
+        self.player_name = self.name_input.text().strip()
+        if not self.player_name:
+            self.show_message("Error", "Name cannot be empty!")
+            return
+        
+        self.balance = load_balance(self.player_name)
+
+        # Switch to the game screen
+        self.app.show_game_screen(self.player_name, self.balance)
+
+
+    def show_message(self, title, message):
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+
+class GameScreen(QWidget):
+    def __init__(self, app, player_name, balance):
+        super().__init__()
+
+        self.setWindowTitle('Blackjack - Game')
+        self.setGeometry(100, 100, 400, 300)
+
+        self.player_name = player_name
+        self.balance = balance
+        self.deck = [{'ertek': ertek, 'suit': suit, 'value': ertekek[ertek]} for ertek in nev for suit in szin] * 4
+        random.shuffle(self.deck)
+
+        # UI Elements
+        self.layout = QVBoxLayout()
+
+        self.balance_label = QLabel(f"Balance: ${self.balance}", self)
+        self.layout.addWidget(self.balance_label)
+
+        self.bet_label = QLabel('Place your bet: $', self)
+        self.layout.addWidget(self.bet_label)
+
+        self.bet_input = QSpinBox(self)
+        self.bet_input.setRange(1, 1000)
+        self.layout.addWidget(self.bet_input)
+
+        self.play_button = QPushButton('Play', self)
+        self.play_button.clicked.connect(self.play_game)
+        self.layout.addWidget(self.play_button)
+
+        self.result_label = QLabel('', self)
+        self.layout.addWidget(self.result_label)
+
+        self.setLayout(self.layout)
+
+    def play_game(self):
+        bet = self.bet_input.value()
+        if bet <= 0 or bet > self.balance:
+            self.show_message("Error", "Invalid bet amount.")
+            return
+    
+        # Deal initial hands
+        player_hand = [self.deck.pop(), self.deck.pop()]
+        dealer_hand = [self.deck.pop(), self.deck.pop()]
+    
+        self.display_hand(player_hand, "Player")
+        self.result_label.setText(f"Dealer shows: {dealer_hand[0]['ertek']} of {dealer_hand[0]['suit']}")
+    
         player_value = calculate_hand_value(player_hand)
-        if player_value > 21:
-            print("Player busts! You lose.")
-            balance -= bet
-            save_balance(player_name, balance)
-            print(f"Your current balance is ${balance}.")
-            return balance
-        print("Options: (H)it, (S)tand, (D)ouble")
-        choice = input("").strip().upper()
-        if choice == 'H':
-            player_hand.append(deck.pop())
-            display_hand(player_hand, player_name)
-        elif choice == 'S':
-            break
-        elif choice == 'D':
-            if len(player_hand) == 2:
-                if bet * 2 > balance:
-                    print("You don't have enough balance to double down!")
-                else:
+        dealer_value = calculate_hand_value(dealer_hand)
+    
+        # Immediate Blackjack check
+        if player_value == 21:
+            self.show_message("Blackjack", "Blackjack! You win!")
+            self.balance += int(bet * 1.5)
+            save_balance(self.player_name, self.balance)
+            return
+    
+        while player_value < 21:
+            self.result_label.setText("Options: Hit (H), Stand (S), Double (D)")
+            choice = input().strip().upper()
+    
+            if choice == 'H':  # Hit
+                player_hand.append(self.deck.pop())
+                self.display_hand(player_hand, "Player")
+                player_value = calculate_hand_value(player_hand)
+            elif choice == 'S':  # Stand
+                break
+            elif choice == 'D' and len(player_hand) == 2:  # Double
+                if bet * 2 <= self.balance:
                     bet *= 2
-                    player_hand.append(deck.pop())
-                    display_hand(player_hand, player_name)
+                    player_hand.append(self.deck.pop())
+                    self.display_hand(player_hand, "Player")
                     break
+                else:
+                    self.show_message("Error", "Not enough balance to double!")
+                    return
             else:
-                print("You can only double on your first turn.")
+                self.show_message("Error", "Invalid choice. Please select again.")
+                continue
+            
+        # Dealer's turn
+        self.result_label.setText(f"Dealer's turn...{dealer_hand[1]['ertek']} of {dealer_hand[1]['suit']}")
+        while dealer_value < 17:
+            dealer_hand.append(self.deck.pop())
+            dealer_value = calculate_hand_value(dealer_hand)
+            self.display_hand(dealer_hand, "Dealer")
+    
+        # Determine winner
+        if dealer_value > 21 or player_value > dealer_value:
+            self.balance += bet
+            self.show_message("You Win!", f"Your current balance is ${self.balance}.")
+        elif player_value < dealer_value:
+            self.balance -= bet
+            self.show_message("You Lose", f"Your current balance is ${self.balance}.")
         else:
-            print("Invalid choice.")
+            self.show_message("Tie", "It's a tie!")
+    
+        save_balance(self.player_name, self.balance)
 
-    # Dealer's turn
-    print("Dealer's turn...")
-    display_hand(dealer_hand, "Dealer")
-    while calculate_hand_value(dealer_hand) < 17:
-        dealer_hand.append(deck.pop())
-        display_hand(dealer_hand, "Dealer")
 
-    dealer_value = calculate_hand_value(dealer_hand)
-    player_value = calculate_hand_value(player_hand)
+    def display_hand(self, hand, name="Player"):
+        hand_str = ', '.join(f"{card['ertek']} of {card['suit']}" for card in hand)
+        self.result_label.setText(f"{name}: {hand_str} (Value: {calculate_hand_value(hand)})")
 
-    # Determine the winner
-    if dealer_value > 21 or player_value > dealer_value:
-        print("You win!")
-        balance += bet
-    elif player_value < dealer_value:
-        print("Dealer wins. You lose.")
-        balance -= bet
-    else:
-        print("It's a tie!")
-    save_balance(player_name, balance)
-    print(f"Your current balance is ${balance}.")
-    return balance
+    def show_message(self, title, message):
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(message)
+        msg.exec()
+
+
+class BlackjackApp(QApplication):
+    def __init__(self, sys_argv):
+        super().__init__(sys_argv)
+
+        self.stack = QStackedWidget()
+
+        # Initialize screens
+        self.login_screen = LoginScreen(self, self.stack)
+        self.stack.addWidget(self.login_screen)
+
+        self.setActiveScreen(self.login_screen)
+
+    def setActiveScreen(self, screen):
+        self.stack.setCurrentWidget(screen)
+        self.stack.show()
+
+    def show_game_screen(self, player_name, balance):
+        game_screen = GameScreen(self, player_name, balance)
+        self.stack.addWidget(game_screen)  # Add game screen to stack
+        self.setActiveScreen(game_screen)  # Switch to the game screen
+
 
 if __name__ == "__main__":
-    print("Welcome to Blackjack!")
-    player_name = input("Enter your name: ").strip()
-    balance = load_balance(player_name)
-    print(f"Welcome, {player_name}!")
-
-    while True:
-        balance = blackjack(player_name, balance)
-        if balance <= 0:
-            print("You ran out of money! Game over.")
-            break
-        again = input("Play again? (Y/N): ").strip().upper()
-        if again != 'Y':
-            break
-    print(f"Goodbye, {player_name}! Your final balance is ${balance}.")
+    app = BlackjackApp(sys.argv)
+    sys.exit(app.exec())
